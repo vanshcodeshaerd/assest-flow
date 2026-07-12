@@ -13,7 +13,7 @@ export async function GET(req: Request) {
     const user = await prisma.user.findUnique({
       where: { email },
       include: {
-        history: {
+        loginHistory: {
           orderBy: { timestamp: 'desc' }
         }
       }
@@ -23,7 +23,7 @@ export async function GET(req: Request) {
       return NextResponse.json({ error: "User not found" }, { status: 404 });
     }
 
-    return NextResponse.json({ history: user.history });
+    return NextResponse.json({ history: user.loginHistory });
   } catch (error) {
     console.error("History error", error);
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });

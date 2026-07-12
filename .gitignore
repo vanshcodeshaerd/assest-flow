@@ -23,3 +23,7 @@ Thumbs.db
 # Databases
 *.db
 *.db-journal
+
+# Session logs
+conversation_log.jsonl
+*.lock

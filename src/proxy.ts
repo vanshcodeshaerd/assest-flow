@@ -6,7 +6,6 @@ interface SessionPayload extends JWTPayload {
   user: {
     id: string;
     email?: string;
-    employeeId?: string;
     role: string;
   };
 }
@@ -35,7 +34,9 @@ export async function proxy(req: NextRequest) {
   if (path.startsWith("/employee")) {
     if (path.startsWith("/employee/login")) return NextResponse.next();
     
-    if (!session || session.user.role !== "EMPLOYEE") {
+    const internalRoles = ["EMPLOYEE", "DEPT_HEAD", "ASSET_MANAGER"];
+
+    if (!session || !internalRoles.includes(session.user.role)) {
       return NextResponse.redirect(new URL("/employee/login", req.nextUrl));
     }
   }

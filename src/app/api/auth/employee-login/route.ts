@@ -1,45 +1,103 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { createSession } from "@/lib/auth";
+import { createSession, verifyPassword, toAuthUser, issueAuthTokens, successResponse, errorResponse } from "@/lib/auth";
+import { loginSchema, validationErrors } from "@/lib/auth-validation";
 
+/**
+ * POST /api/auth/employee-login
+ * 
+ * Employee login portal accepting email OR employeeId
+ * - Validates input using Zod
+ * - Verifies password using scrypt
+ * - Checks user active status
+ * - Restricts to employee roles only
+ * - Creates session with JWT + refresh token
+ * - Logs login history
+ * - Returns user + accessToken
+ */
 export async function POST(req: Request) {
   try {
-    const { employeeId, password } = await req.json();
+    const body = await req.json();
 
-    if (!employeeId || !password) {
-      return NextResponse.json({ error: "Employee ID and password required" }, { status: 400 });
+    // Validate request body
+    const validationResult = loginSchema.safeParse(body);
+    if (!validationResult.success) {
+      return errorResponse(
+        "Validation Error",
+        400,
+        validationErrors(validationResult.error)
+      );
     }
 
-    const user = await prisma.user.findUnique({
-      where: { employeeId },
+    const { identifier, password } = validationResult.data;
+
+    // Find user by email or employeeId
+    const user = await prisma.user.findFirst({
+      where: {
+        OR: [
+          { email: identifier.toLowerCase() },
+          { employeeId: identifier },
+        ],
+      },
     });
 
     if (!user) {
-      return NextResponse.json({ error: "Invalid credentials" }, { status: 401 });
+      return errorResponse("Invalid credentials", 401);
     }
 
-    if (user.passwordHash !== password) {
-      return NextResponse.json({ error: "Invalid credentials" }, { status: 401 });
+    // Verify password
+    const isValidPassword = verifyPassword(password, user.passwordHash);
+    if (!isValidPassword) {
+      return errorResponse("Invalid credentials", 401);
     }
 
-    if (user.role !== "EMPLOYEE") {
-      return NextResponse.json({ error: "This login portal is only for employees." }, { status: 403 });
+    // Check if user is active
+    if (!user.isActive || user.status !== "ACTIVE") {
+      return errorResponse("Account is inactive. Please contact administrator.", 403);
     }
 
-    // Create session
-    await createSession({
-      id: user.id,
-      employeeId: user.employeeId,
-      role: user.role,
-    });
+    // Role check - only employees can use this portal
+    const internalRoles = ["EMPLOYEE", "DEPT_HEAD", "ASSET_MANAGER"];
+    if (!internalRoles.includes(user.role)) {
+      return errorResponse("This login portal is only for employee accounts.", 403);
+    }
 
+    // Issue auth tokens
+    const authUser = toAuthUser(user);
+    const { accessToken } = await issueAuthTokens(authUser);
+
+    // Create session cookie
+    await createSession(authUser);
+
+    // Log login history
     await prisma.loginHistory.create({
       data: { userId: user.id },
     });
 
-    return NextResponse.json({ success: true, redirect: "/employee/dashboard" });
+    // Log activity
+    await prisma.activityLog.create({
+      data: {
+        userId: user.id,
+        action: "LOGIN",
+        entity: "USER",
+        entityId: user.id,
+      },
+    });
+
+    return successResponse({
+      user: {
+        id: authUser.id,
+        email: authUser.email,
+        firstName: authUser.firstName,
+        lastName: authUser.lastName,
+        employeeId: authUser.employeeId,
+        role: authUser.role,
+      },
+      accessToken,
+      redirect: "/employee/dashboard",
+    });
   } catch (error) {
-    console.error("Login error", error);
-    return NextResponse.json({ error: "Internal server error" }, { status: 500 });
+    console.error("Employee login error:", error);
+    return errorResponse("Internal server error", 500);
   }
 }
