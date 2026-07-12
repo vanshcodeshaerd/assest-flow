@@ -1,0 +1,26 @@
+generator client {
+  provider = "prisma-client-js"
+  engineType = "binary"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           String         @id @default(uuid())
+  email        String?        @unique
+  employeeId   String?        @unique
+  passwordHash String
+  role         String         @default("EMPLOYEE")
+  createdAt    DateTime       @default(now())
+  history      LoginHistory[]
+}
+
+model LoginHistory {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  timestamp DateTime @default(now())
+}
